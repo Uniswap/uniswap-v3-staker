@@ -42,15 +42,19 @@ interface IUniswapV3Staker is IERC721Receiver, IMulticall {
     /// @notice Represents a staking incentive
     /// @param incentiveId The ID of the incentive computed from its parameters
     /// @return totalRewardUnclaimed The amount of reward token not yet claimed by users
+    /// @return totalRewardAllocated The amount of reward token was allocated to incentive campaign
     /// @return totalSecondsClaimedX128 Total liquidity-seconds claimed, represented as a UQ32.128
     /// @return numberOfStakes The count of deposits that are currently staked for the incentive
+    /// @return success True if the incentive accrues sufficient rewards to cover distribution
     function incentives(bytes32 incentiveId)
         external
         view
         returns (
             uint256 totalRewardUnclaimed,
+            uint256 totalRewardAllocated,
             uint160 totalSecondsClaimedX128,
-            uint96 numberOfStakes
+            uint96 numberOfStakes,
+            bool success
         );
 
     /// @notice Returns information about a deposited NFT
@@ -120,12 +124,12 @@ interface IUniswapV3Staker is IERC721Receiver, IMulticall {
     function unstakeToken(IncentiveKey memory key, uint256 tokenId) external;
 
     /// @notice Transfers `amountRequested` of accrued `rewardToken` rewards from the contract to the recipient `to`
-    /// @param rewardToken The token being distributed as a reward
+    /// @param key The key of the incentive for which to unstake the NFT
     /// @param to The address where claimed rewards will be sent to
     /// @param amountRequested The amount of reward tokens to claim. Claims entire reward amount if set to 0.
     /// @return reward The amount of reward tokens claimed
     function claimReward(
-        IERC20Minimal rewardToken,
+        IncentiveKey memory key,
         address to,
         uint256 amountRequested
     ) external returns (uint256 reward);
