@@ -20,8 +20,10 @@ contract UniswapV3Staker is IUniswapV3Staker, Multicall {
     /// @notice Represents a staking incentive
     struct Incentive {
         uint256 totalRewardUnclaimed;
+        uint256 totalRewardAllocated;
         uint160 totalSecondsClaimedX128;
         uint96 numberOfStakes;
+        bool success;
     }
 
     /// @notice Represents the deposit of a liquidity NFT
@@ -95,6 +97,7 @@ contract UniswapV3Staker is IUniswapV3Staker, Multicall {
 
     /// @inheritdoc IUniswapV3Staker
     function createIncentive(IncentiveKey memory key, uint256 reward) external override {
+        // TODO read TTG address override for the pool
         require(reward > 0, 'UniswapV3Staker::createIncentive: reward must be positive');
         require(
             block.timestamp <= key.startTime,
@@ -113,8 +116,9 @@ contract UniswapV3Staker is IUniswapV3Staker, Multicall {
         bytes32 incentiveId = IncentiveId.compute(key);
 
         incentives[incentiveId].totalRewardUnclaimed += reward;
+        incentives[incentiveId].totalRewardAllocated += reward;
 
-        TransferHelperExtended.safeTransferFrom(address(key.rewardToken), msg.sender, address(this), reward);
+        // TransferHelperExtended.safeTransferFrom(address(key.rewardToken), msg.sender, address(this), reward);
 
         emit IncentiveCreated(key.rewardToken, key.pool, key.startTime, key.endTime, key.refundee, reward);
     }
@@ -123,19 +127,29 @@ contract UniswapV3Staker is IUniswapV3Staker, Multicall {
     function endIncentive(IncentiveKey memory key) external override returns (uint256 refund) {
         require(block.timestamp >= key.endTime, 'UniswapV3Staker::endIncentive: cannot end incentive before end time');
 
+        // TODO check if already ended and refunded once
+
         bytes32 incentiveId = IncentiveId.compute(key);
         Incentive storage incentive = incentives[incentiveId];
 
-        refund = incentive.totalRewardUnclaimed;
+        uint256 rewardTokenBalance = key.rewardToken.balanceOf(address(this));
 
-        require(refund > 0, 'UniswapV3Staker::endIncentive: no refund available');
-        require(
-            incentive.numberOfStakes == 0,
-            'UniswapV3Staker::endIncentive: cannot end incentive while deposits are staked'
-        );
+        if (rewardTokenBalance < incentive.totalRewardAllocated) {
+            refund = rewardTokenBalance;
+        } else {
+            refund = incentive.totalRewardUnclaimed;
+            incentive.success = true;
+        }
+
+        // require(refund > 0, 'UniswapV3Staker::endIncentive: no refund available');
+        // require(
+        //     incentive.numberOfStakes == 0,
+        //     'UniswapV3Staker::endIncentive: cannot end incentive while deposits are staked'
+        // );
 
         // issue the refund
         incentive.totalRewardUnclaimed = 0;
+
         TransferHelperExtended.safeTransfer(address(key.rewardToken), key.refundee, refund);
 
         // note we never clear totalSecondsClaimedX128
@@ -261,17 +275,22 @@ contract UniswapV3Staker is IUniswapV3Staker, Multicall {
 
     /// @inheritdoc IUniswapV3Staker
     function claimReward(
-        IERC20Minimal rewardToken,
+        IncentiveKey memory key,
         address to,
         uint256 amountRequested
     ) external override returns (uint256 reward) {
-        reward = rewards[rewardToken][msg.sender];
+        bytes32 incentiveId = IncentiveId.compute(key);
+        Incentive memory incentive = incentives[incentiveId];
+
+        require(incentive.success == true, 'UniswapV3Staker::claimReward: incentive was not successful');
+
+        reward = rewards[key.rewardToken][msg.sender];
         if (amountRequested != 0 && amountRequested < reward) {
             reward = amountRequested;
         }
 
-        rewards[rewardToken][msg.sender] -= reward;
-        TransferHelperExtended.safeTransfer(address(rewardToken), to, reward);
+        rewards[key.rewardToken][msg.sender] -= reward;
+        TransferHelperExtended.safeTransfer(address(key.rewardToken), to, reward);
 
         emit RewardClaimed(to, reward);
     }
